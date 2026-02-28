@@ -10,6 +10,11 @@
   <img src="https://img.shields.io/badge/Local--First-Yes-2f7dff" alt="Local First">
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue" alt="Apache 2.0">
 </p>
+<p align="center">
+  <a href="https://gitkbdl.github.io/pixel-ranks/">
+    <img src="https://img.shields.io/badge/Открыть%20онлайн-Pixel%20Ranks-20c997?style=for-the-badge" alt="Открыть онлайн">
+  </a>
+</p>
 
 ## О проекте
 
