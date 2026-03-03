@@ -587,6 +587,106 @@ function transliterateForFont(inputText) {
     .replace(/[^\x20-\x7e]/g, ' ')
 }
 
+function getGlyphInfoByIndex(index) {
+  const fallback = { width: tileSize, offsetX: 0 }
+  const info = charWidths[index] ?? fallback
+  return {
+    sourceX: (index % 16) * tileSize + info.offsetX,
+    sourceY: Math.floor(index / 16) * tileSize,
+    width: info.width
+  }
+}
+
+function buildGlyphs(chars) {
+  const glyphs = []
+  let cursor = padding + 1
+
+  for (const char of chars) {
+    const index = charToIndex(char)
+    const glyph = getGlyphInfoByIndex(index)
+    glyphs.push({
+      sourceX: glyph.sourceX,
+      sourceY: glyph.sourceY,
+      width: glyph.width,
+      targetX: cursor
+    })
+    cursor += glyph.width + spacing
+  }
+
+  return glyphs
+}
+
+function calculateCanvasSize(chars) {
+  let totalWidth = padding + 1
+
+  for (const char of chars) {
+    const index = charToIndex(char)
+    totalWidth += (charWidths[index]?.width ?? tileSize) + spacing
+  }
+
+  const borderExtension = showBorder.value && showShadow.value ? 1 : 0
+  return {
+    finalWidth: totalWidth - spacing + 2 + borderExtension,
+    finalHeight: height + 1
+  }
+}
+
+function drawBackgroundAndBorder(ctx, finalWidth, finalHeight) {
+  ctx.fillStyle = useBgGradient.value
+    ? createGradient(ctx, finalWidth, finalHeight, bgColor.value, bgGradientColor.value)
+    : bgColor.value
+  ctx.fillRect(0, 0, finalWidth, finalHeight)
+
+  if (!showBorder.value) {
+    return
+  }
+
+  ctx.fillStyle = useBorderGradient.value
+    ? createGradient(ctx, finalWidth, finalHeight, borderColor.value, borderGradientColor.value)
+    : borderColor.value
+  ctx.fillRect(0, 0, finalWidth, 1)
+  ctx.fillRect(0, finalHeight - 1, finalWidth, 1)
+  ctx.fillRect(0, 0, 1, finalHeight)
+  ctx.fillRect(finalWidth - 1, 0, 1, finalHeight)
+}
+
+function drawGlyphs(ctx, glyphs, offsetX = 0) {
+  for (const glyph of glyphs) {
+    ctx.drawImage(
+      fontImage,
+      glyph.sourceX,
+      glyph.sourceY,
+      glyph.width,
+      tileSize,
+      glyph.targetX + offsetX,
+      0,
+      glyph.width,
+      tileSize
+    )
+  }
+}
+
+function createGlyphMaskLayer(finalWidth, finalHeight, glyphs, offsetX, color, gradientColor, useGradient) {
+  const layer = document.createElement('canvas')
+  layer.width = finalWidth
+  layer.height = finalHeight
+  const layerCtx = layer.getContext('2d')
+
+  if (!layerCtx) {
+    return null
+  }
+
+  layerCtx.imageSmoothingEnabled = false
+  drawGlyphs(layerCtx, glyphs, offsetX)
+  layerCtx.globalCompositeOperation = 'source-in'
+  layerCtx.fillStyle = useGradient
+    ? createGradient(layerCtx, finalWidth, finalHeight, color, gradientColor)
+    : color
+  layerCtx.fillRect(0, 0, finalWidth, finalHeight)
+  layerCtx.globalCompositeOperation = 'source-over'
+  return layer
+}
+
 const draw = () => {
   if (!canvas.value || !fontImage.complete) return
 
@@ -595,134 +695,46 @@ const draw = () => {
   ctx.imageSmoothingEnabled = false
 
   const chars = transliterateForFont(text.value).split('')
-  let totalWidth = padding + 1
-
-  for (const char of chars) {
-    const i = charToIndex(char)
-    const measuredWidth = charWidths[i]?.width ?? tileSize
-    totalWidth += measuredWidth + spacing
-  }
-
-  const borderExtension = showBorder.value && showShadow.value ? 1 : 0
-  const finalWidth = totalWidth - spacing + 2 + borderExtension
-  const finalHeight = height + 1
+  const { finalWidth, finalHeight } = calculateCanvasSize(chars)
+  const glyphs = buildGlyphs(chars)
 
   canvas.value.width = finalWidth
   canvas.value.height = finalHeight
   width.value = finalWidth
 
-  ctx.fillStyle = useBgGradient.value
-    ? createGradient(ctx, finalWidth, finalHeight, bgColor.value, bgGradientColor.value)
-    : bgColor.value
-  ctx.fillRect(0, 0, finalWidth, finalHeight)
-
-  if (showBorder.value) {
-    ctx.fillStyle = useBorderGradient.value
-      ? createGradient(ctx, finalWidth, finalHeight, borderColor.value, borderGradientColor.value)
-      : borderColor.value
-    ctx.fillRect(0, 0, finalWidth, 1)
-    ctx.fillRect(0, finalHeight - 1, finalWidth, 1)
-    ctx.fillRect(0, 0, 1, finalHeight)
-    ctx.fillRect(finalWidth - 1, 0, 1, finalHeight)
-  }
-
-  const glyphs = []
-  let cursor = padding + 1
-  for (const char of chars) {
-    const i = charToIndex(char)
-    const tileX = (i % 16) * tileSize
-    const tileY = Math.floor(i / 16) * tileSize
-    const info = charWidths[i] ?? { width: tileSize, offsetX: 0 }
-
-    glyphs.push({
-      sourceX: tileX + info.offsetX,
-      sourceY: tileY,
-      width: info.width,
-      targetX: cursor
-    })
-
-    cursor += info.width + spacing
-  }
+  drawBackgroundAndBorder(ctx, finalWidth, finalHeight)
 
   if (showShadow.value) {
-    const shadowLayer = document.createElement('canvas')
-    shadowLayer.width = finalWidth
-    shadowLayer.height = finalHeight
-    const shadowCtx = shadowLayer.getContext('2d')
-
-    if (shadowCtx) {
-      shadowCtx.imageSmoothingEnabled = false
-      for (const glyph of glyphs) {
-        shadowCtx.drawImage(
-          fontImage,
-          glyph.sourceX,
-          glyph.sourceY,
-          glyph.width,
-          tileSize,
-          glyph.targetX + 1,
-          0,
-          glyph.width,
-          tileSize
-        )
-      }
-
-      shadowCtx.globalCompositeOperation = 'source-in'
-      shadowCtx.fillStyle = useShadowGradient.value
-        ? createGradient(shadowCtx, finalWidth, finalHeight, shadowColor.value, shadowGradientColor.value)
-        : shadowColor.value
-      shadowCtx.fillRect(0, 0, finalWidth, finalHeight)
-      shadowCtx.globalCompositeOperation = 'source-over'
-
+    const shadowLayer = createGlyphMaskLayer(
+      finalWidth,
+      finalHeight,
+      glyphs,
+      1,
+      shadowColor.value,
+      shadowGradientColor.value,
+      useShadowGradient.value
+    )
+    if (shadowLayer) {
       ctx.drawImage(shadowLayer, 0, 0)
     }
   }
 
   const needsTextMask = useTextGradient.value || textColor.value.toLowerCase() !== '#ffffff'
   if (needsTextMask) {
-    const textLayer = document.createElement('canvas')
-    textLayer.width = finalWidth
-    textLayer.height = finalHeight
-    const textCtx = textLayer.getContext('2d')
-
-    if (textCtx) {
-      textCtx.imageSmoothingEnabled = false
-      for (const glyph of glyphs) {
-        textCtx.drawImage(
-          fontImage,
-          glyph.sourceX,
-          glyph.sourceY,
-          glyph.width,
-          tileSize,
-          glyph.targetX,
-          0,
-          glyph.width,
-          tileSize
-        )
-      }
-
-      textCtx.globalCompositeOperation = 'source-in'
-      textCtx.fillStyle = useTextGradient.value
-        ? createGradient(textCtx, finalWidth, finalHeight, textColor.value, textGradientColor.value)
-        : textColor.value
-      textCtx.fillRect(0, 0, finalWidth, finalHeight)
-      textCtx.globalCompositeOperation = 'source-over'
-
+    const textLayer = createGlyphMaskLayer(
+      finalWidth,
+      finalHeight,
+      glyphs,
+      0,
+      textColor.value,
+      textGradientColor.value,
+      useTextGradient.value
+    )
+    if (textLayer) {
       ctx.drawImage(textLayer, 0, 0)
     }
   } else {
-    for (const glyph of glyphs) {
-      ctx.drawImage(
-        fontImage,
-        glyph.sourceX,
-        glyph.sourceY,
-        glyph.width,
-        tileSize,
-        glyph.targetX,
-        0,
-        glyph.width,
-        tileSize
-      )
-    }
+    drawGlyphs(ctx, glyphs)
   }
 
   imageSrc.value = canvas.value.toDataURL()
@@ -799,6 +811,35 @@ function getClipboardErrorMessage(error) {
   return 'Не удалось скопировать PNG. Можно скачать файл кнопкой рядом.'
 }
 
+function supportsNativeClipboardImageCopy() {
+  return Boolean(
+    navigator.clipboard &&
+      typeof navigator.clipboard.write === 'function' &&
+      typeof ClipboardItem !== 'undefined'
+  )
+}
+
+function supportsTextClipboardCopy() {
+  return Boolean(navigator.clipboard && typeof navigator.clipboard.writeText === 'function')
+}
+
+async function tryNativeClipboardCopy(canvasElement) {
+  const directClipboardItem = createClipboardItemFromCanvas(canvasElement)
+  if (directClipboardItem) {
+    await navigator.clipboard.write([directClipboardItem])
+    return true
+  }
+
+  const fallbackBlob = await createPngBlobFromCanvas(canvasElement)
+  if (!fallbackBlob) {
+    return false
+  }
+
+  const mimeType = fallbackBlob.type || 'image/png'
+  await navigator.clipboard.write([new ClipboardItem({ [mimeType]: fallbackBlob })])
+  return true
+}
+
 async function copyImage() {
   if (!canvas.value || !imageSrc.value) {
     return
@@ -810,30 +851,14 @@ async function copyImage() {
   }
 
   try {
-    const hasNativeImageCopySupport = Boolean(
-      navigator.clipboard &&
-        typeof navigator.clipboard.write === 'function' &&
-        typeof ClipboardItem !== 'undefined'
-    )
-
-    if (hasNativeImageCopySupport) {
+    if (supportsNativeClipboardImageCopy()) {
       try {
-        const directClipboardItem = createClipboardItemFromCanvas(canvas.value)
-        if (directClipboardItem) {
-          await navigator.clipboard.write([directClipboardItem])
-          setNotice('PNG скопирован в буфер обмена', 'success')
-          return
-        }
-
-        const fallbackBlob = await createPngBlobFromCanvas(canvas.value)
-        if (fallbackBlob) {
-          const mimeType = fallbackBlob.type || 'image/png'
-          await navigator.clipboard.write([new ClipboardItem({ [mimeType]: fallbackBlob })])
+        if (await tryNativeClipboardCopy(canvas.value)) {
           setNotice('PNG скопирован в буфер обмена', 'success')
           return
         }
       } catch (nativeCopyError) {
-        if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+        if (!supportsTextClipboardCopy()) {
           setNotice(getClipboardErrorMessage(nativeCopyError), 'error')
           return
         }
@@ -841,12 +866,12 @@ async function copyImage() {
     }
 
     const blob = await createPngBlobFromCanvas(canvas.value)
-    if (!blob && (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function')) {
+    if (!blob && !supportsTextClipboardCopy()) {
       setNotice('Не удалось подготовить PNG для копирования', 'error')
       return
     }
 
-    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    if (supportsTextClipboardCopy()) {
       await navigator.clipboard.writeText(imageSrc.value)
       setNotice('PNG как изображение недоступен. Скопирована data-ссылка.', 'info')
       return
@@ -865,10 +890,24 @@ function createProjectId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-function normalizeProject(rawProject) {
-  const source = rawProject && typeof rawProject === 'object' ? rawProject : {}
+const VALID_GRADIENT_DIRECTIONS = new Set(['horizontal', 'vertical', 'diagonal'])
+
+function asProjectSource(rawProject) {
+  return rawProject && typeof rawProject === 'object' ? rawProject : {}
+}
+
+function normalizeProjectUpdatedAt(rawUpdatedAt) {
   const fallbackDate = new Date().toISOString()
-  const parsedDate = Date.parse(source.updatedAt ?? '')
+  const parsedDate = Date.parse(rawUpdatedAt ?? '')
+  return Number.isNaN(parsedDate) ? fallbackDate : new Date(parsedDate).toISOString()
+}
+
+function normalizeGradientDirection(rawDirection) {
+  return VALID_GRADIENT_DIRECTIONS.has(rawDirection) ? rawDirection : DEFAULT_APPEARANCE.gradientDirection
+}
+
+function normalizeProject(rawProject) {
+  const source = asProjectSource(rawProject)
 
   return {
     id: String(source.id ?? createProjectId()),
@@ -886,14 +925,12 @@ function normalizeProject(rawProject) {
     textColor: String(source.textColor ?? DEFAULT_APPEARANCE.textColor),
     useTextGradient: source.useTextGradient === true,
     textGradientColor: String(source.textGradientColor ?? DEFAULT_APPEARANCE.textGradientColor),
-    gradientDirection: ['horizontal', 'vertical', 'diagonal'].includes(source.gradientDirection)
-      ? source.gradientDirection
-      : DEFAULT_APPEARANCE.gradientDirection,
+    gradientDirection: normalizeGradientDirection(source.gradientDirection),
     showBorder: source.showBorder !== false,
     showShadow: source.showShadow !== false,
     selectedPreset: String(source.selectedPreset ?? ''),
     preview: String(source.preview ?? ''),
-    updatedAt: Number.isNaN(parsedDate) ? fallbackDate : new Date(parsedDate).toISOString()
+    updatedAt: normalizeProjectUpdatedAt(source.updatedAt)
   }
 }
 
